@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Viewer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      height: 100vh;
+      background-color: #0f172a;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #f1f5f9;
+      padding: 20px;
+    }
+
+    h2 {
+      font-size: 2.2rem;
+      margin-bottom: 30px;
+      color: #38bdf8;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+
+    video {
+      width: 100%;
+      max-width: 860px;
+      height: auto;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      background-color: #1e293b;
+      border: 2px solid #334155;
+    }
+
+    @media (max-width: 768px) {
+      h2 {
+        font-size: 1.6rem;
+      }
+
+      video {
+        max-width: 100%;
+        border-radius: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>👀 Watching Live Stream</h2>
+  <video id="remoteVideo" autoplay playsinline controls></video>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const roomID = 'classroom';
+    const socket = io();
+
+    const config = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    let peerConnection;
+    const videoElement = document.getElementById('remoteVideo');
+
+    socket.emit('watcher', roomID);
+
+    socket.on('offer', (broadcasterSocketId, offer) => {
+      peerConnection = new RTCPeerConnection(config);
+
+      peerConnection.ontrack = event => {
+        videoElement.srcObject = event.streams[0];
+      };
+
+      peerConnection.onicecandidate = event => {
+        if (event.candidate) {
+          socket.emit('candidate', broadcasterSocketId, event.candidate);
+        }
+      };
+
+      peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+        .then(() => peerConnection.createAnswer())
+        .then(answer => peerConnection.setLocalDescription(answer))
+        .then(() => {
+          socket.emit('answer', broadcasterSocketId, peerConnection.localDescription);
+        });
+    });
+
+    socket.on('candidate', (broadcasterSocketId, candidate) => {
+      if (peerConnection) {
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    });
+
+    window.onbeforeunload = () => {
+      socket.close();
+    };
+  </script>
+</body>
+</html>

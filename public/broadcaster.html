@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Broadcaster</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      height: 100vh;
+      background-color: #1e293b;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #f1f5f9;
+      padding: 20px;
+    }
+
+    h2 {
+      font-size: 2rem;
+      margin-bottom: 20px;
+      color: #34d399;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+
+    video {
+      width: 100%;
+      max-width: 820px;
+      height: auto;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      background-color: #1e293b;
+      border: 2px solid #334155;
+      margin-bottom: 20px;
+    }
+
+    .button-container {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    button {
+      padding: 12px 24px;
+      background-color: #34d399;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background-color 0.3s;
+      min-width: 140px;
+    }
+
+    button:hover {
+      background-color: #10b981;
+    }
+
+    button:disabled {
+      background-color: #6b7280;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+      h2 {
+        font-size: 1.6rem;
+      }
+
+      video {
+        max-width: 100%;
+        border-radius: 12px;
+      }
+
+      .button-container {
+        flex-direction: column;
+        gap: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>🎥 Live Stream - Broadcaster</h2>
+  <video id="localVideo" autoplay playsinline muted></video>
+
+  <div class="button-container">
+    <button id="startBtn">Start Broadcast</button>
+    <button id="stopBtn" disabled>Stop Broadcast</button>
+    <button id="resumeBtn" disabled>Resume Broadcast</button>
+    <button id="endBtn" disabled>End Broadcast</button>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const roomID = 'classroom';
+    const socket = io();
+    const config = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    const localVideo = document.getElementById('localVideo');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const endBtn = document.getElementById('endBtn');
+    
+    let localStream;
+    let isBroadcasting = false;
+    const peers = {};
+
+    // Start the broadcast
+    startBtn.addEventListener('click', () => {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => {
+          localVideo.srcObject = stream;
+          localStream = stream;
+          socket.emit('broadcaster', roomID);
+          isBroadcasting = true;
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+          resumeBtn.disabled = true;
+          endBtn.disabled = false;
+          console.log('Broadcast started');
+        })
+        .catch(err => console.error('Failed to get media:', err));
+    });
+
+    // Handle incoming viewers
+    socket.on('watcher', (viewerSocketId) => {
+      const peerConnection = new RTCPeerConnection(config);
+      peers[viewerSocketId] = peerConnection;
+
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+      peerConnection.onicecandidate = event => {
+        if (event.candidate) {
+          socket.emit('candidate', viewerSocketId, event.candidate);
+        }
+      };
+
+      peerConnection.createOffer()
+        .then(offer => peerConnection.setLocalDescription(offer))
+        .then(() => {
+          socket.emit('offer', viewerSocketId, peerConnection.localDescription);
+        });
+    });
+
+    socket.on('answer', (viewerSocketId, answer) => {
+      const pc = peers[viewerSocketId];
+      pc.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('candidate', (viewerSocketId, candidate) => {
+      const pc = peers[viewerSocketId];
+      if (pc) {
+        pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    });
+
+    // Stop the broadcast
+    stopBtn.addEventListener('click', () => {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());  // Stop all tracks
+        isBroadcasting = false;
+        stopBtn.disabled = true;
+        resumeBtn.disabled = false;
+        console.log('Broadcast stopped');
+      }
+    });
+
+    // Resume the broadcast
+    resumeBtn.addEventListener('click', () => {
+      if (!isBroadcasting) {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          .then(stream => {
+            localVideo.srcObject = stream;
+            localStream = stream;
+            socket.emit('broadcaster', roomID);
+            isBroadcasting = true;
+            resumeBtn.disabled = true;
+            stopBtn.disabled = false;
+            console.log('Broadcast resumed');
+          })
+          .catch(err => console.error('Failed to resume media:', err));
+      }
+    });
+
+    // End the broadcast
+    endBtn.addEventListener('click', () => {
+      socket.emit('endBroadcast', roomID);  // Emit end broadcast event to server
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());  // Stop all tracks
+      }
+      socket.close();  // Close the socket connection
+      console.log('Broadcast ended');
+      window.location.href = '/';  // Redirect to a different page (e.g., home)
+    });
+
+    window.onbeforeunload = () => {
+      socket.close();
+    };
+  </script>
+</body>
+</html>
